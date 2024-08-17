@@ -12,6 +12,7 @@ from classification.efficientnet import (efficientnet_b0, efficientnet_b1, effic
                                          efficientnet_l2, efficientnet_b8)
 from segmentation.deeplab import DeepLabV3Plus
 from segmentation.unet import Unet
+from segmentation.unetplusplus import UnetPlusPlus
 from segmentation.duat import DuAT
 
 model2name = {
@@ -45,6 +46,7 @@ model2name = {
 segmentation_model2name = {
     'duat': DuAT,
     'unet': Unet,
+    'unetplusplus': UnetPlusPlus,
     'deeplabv3plus': DeepLabV3Plus
 }
 

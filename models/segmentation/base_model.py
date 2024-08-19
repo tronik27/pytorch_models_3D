@@ -3,8 +3,6 @@ from torch import nn
 from typing import Tuple
 from collections import OrderedDict
 from rich import print as rprint
-import timm
-from typing import Dict
 
 from base_modules import initialize_decoder, initialize_head
 

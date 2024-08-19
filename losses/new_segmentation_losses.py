@@ -7,10 +7,14 @@ from abc import ABC, abstractmethod
 
 
 class SegmentationLoss(torch.nn.Module, ABC):
-    """
-    Base loss function class.
-    """
+
     def __init__(self, ignore_value: float, pos_weight: torch.Tensor):
+        """
+        Base segmentation loss function class
+        Args:
+            ignore_value:
+            pos_weight:
+        """
         super().__init__()
         self.ignore_value = ignore_value
         self.pos_weight = pos_weight
@@ -111,9 +115,7 @@ class CrossEntropy(SegmentationLoss):
 
 
 class MaskBCE(CrossEntropy):
-    """
-    Binary cross entropy segmentation loss class.
-    """
+    """Binary cross entropy segmentation loss class."""
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None) -> torch.Tensor:
         """
         Method for loss value calculation.
@@ -141,6 +143,13 @@ class MaskFocal(CrossEntropy):
     ) -> None:
         """
         Focal binary cross entropy segmentation loss class.
+        Args:
+            pos_weight:
+            reduction:
+            from_logits:
+            mode:
+            ignore_value:
+            gamma:
         """
         super().__init__(
             reduction=reduction, pos_weight=pos_weight, mode=mode, ignore_value=ignore_value, from_logits=from_logits

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from typing import Optional, Union, Tuple
 
 from base_modules import ClassificationHead, SegmentationHead, Conv3dReLU
-from main import BaseSegmentationModel
+from base_model import BaseSegmentationModel
 
 
 class PAB(nn.Module):

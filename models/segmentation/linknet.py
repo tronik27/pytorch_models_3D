@@ -3,7 +3,7 @@ import torch
 from typing import Optional, Union
 
 from base_modules import DecoderBlock, ClassificationHead, SegmentationHead
-from main import BaseSegmentationModel
+from base_model import BaseSegmentationModel
 
 
 class Linknet(BaseSegmentationModel):

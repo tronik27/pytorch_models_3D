@@ -5,7 +5,7 @@ from torch import nn
 from typing import Tuple, Dict, List, Optional
 from rich import print as rprint
 
-from main import BaseSegmentationModel
+from base_model import BaseSegmentationModel
 from base_modules import ClassificationHead, Activation
 
 warnings.filterwarnings('ignore')

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from typing import Optional, Union
 
 from base_modules import ClassificationHead, SegmentationHead
-from main import BaseSegmentationModel
+from base_model import BaseSegmentationModel
 
 
 class ConvBnRelu(nn.Module):

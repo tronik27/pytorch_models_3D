@@ -4,7 +4,7 @@ from typing import Optional
 import torch.nn.functional as F
 
 from base_modules import SegmentationHead, ClassificationHead
-from main import BaseSegmentationModel
+from base_model import BaseSegmentationModel
 
 
 class DeepLabV3(BaseSegmentationModel):

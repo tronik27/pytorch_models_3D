@@ -3,7 +3,7 @@ import torch
 from typing import List, Optional, Union
 
 from base_modules import CenterBlock, DecoderBlock, ClassificationHead, SegmentationHead
-from main import BaseSegmentationModel
+from base_model import BaseSegmentationModel
 
 
 class UnetPlusPlus(BaseSegmentationModel):

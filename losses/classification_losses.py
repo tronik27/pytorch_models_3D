@@ -1,7 +1,6 @@
 from torch import nn
 import torch
 from abc import ABC, abstractmethod
-import torch.nn.functional as func
 
 
 class ClassificationLoss(nn.Module, ABC):
@@ -11,6 +10,10 @@ class ClassificationLoss(nn.Module, ABC):
         self.ignore_value = ignore_value
         self.reduction = reduction
         self.pos_weight = pos_weight
+
+    @abstractmethod
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor):
+        pass
 
     def ignore(self, y_true, y_pred):
         """
@@ -72,6 +75,30 @@ class BCELoss(CrossEntropy):
 
 
 class FocalLoss(CrossEntropy):
+
+    def __init__(
+            self,
+            pos_weight=None,
+            reduction='mean',
+            from_logits=True,
+            mode: str = 'binary',
+            ignore_value=-1,
+            gamma=2,
+    ) -> None:
+        """
+        Focal binary cross entropy segmentation loss class.
+        Args:
+            pos_weight:
+            reduction:
+            from_logits:
+            mode:
+            ignore_value:
+            gamma:
+        """
+        super().__init__(
+            reduction=reduction, pos_weight=pos_weight, mode=mode, ignore_value=ignore_value, from_logits=from_logits
+        )
+        self.gamma = gamma
 
     def forward(self, y_pred, y_true):
         """

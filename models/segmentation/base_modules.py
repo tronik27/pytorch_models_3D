@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -89,7 +90,7 @@ class Conv3dReLU(nn.Sequential):
         self,
         in_channels,
         out_channels,
-        kernel_size,
+        kernel_size: Tuple[int, int, int] or int,
         padding=0,
         stride=1,
         use_batchnorm=True,

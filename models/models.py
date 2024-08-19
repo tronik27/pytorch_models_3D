@@ -1,7 +1,6 @@
 import functools
 import numpy as np
 from functools import wraps
-from typing import List
 
 from classification.resnet import resnet18, resnet10, resnet34, resnet50, resnet101, resnet152, resnet200
 from classification.resnext import resnext50, resnext101, resnext152
@@ -10,10 +9,15 @@ from classification.densenet import densenet121, densenet169, densenet201, dense
 from classification.efficientnet import (efficientnet_b0, efficientnet_b1, efficientnet_b2, efficientnet_b3,
                                          efficientnet_b4, efficientnet_b5, efficientnet_b6, efficientnet_b7,
                                          efficientnet_l2, efficientnet_b8)
-from segmentation.deeplab import DeepLabV3Plus
+from segmentation.deeplab import DeepLabV3Plus, DeepLabV3
 from segmentation.unet import Unet
 from segmentation.unetplusplus import UnetPlusPlus
 from segmentation.duat import DuAT
+from segmentation.fpn import FPN
+from segmentation.linknet import Linknet
+from segmentation.manet import MAnet
+from segmentation.pspnet import PSPNet
+from segmentation.pan import PAN
 
 model2name = {
     'resnet10': resnet10,
@@ -47,7 +51,13 @@ segmentation_model2name = {
     'duat': DuAT,
     'unet': Unet,
     'unetplusplus': UnetPlusPlus,
-    'deeplabv3plus': DeepLabV3Plus
+    'linknet': Linknet,
+    'fpn': FPN,
+    'deeplabv3plus': DeepLabV3Plus,
+    'deeplabv3': DeepLabV3,
+    'manet': MAnet,
+    'pspnet': PSPNet,
+    'pan': PAN,
 }
 
 

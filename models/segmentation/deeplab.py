@@ -7,6 +7,64 @@ from base_modules import SegmentationHead, ClassificationHead
 from main import BaseSegmentationModel
 
 
+class DeepLabV3(BaseSegmentationModel):
+    """DeepLabV3_ implementation from "Rethinking Atrous Convolution for Semantic Image Segmentation"
+
+    Args:
+        encoder: Classification model that will be used as an encoder (a.k.a backbone)
+            to extract features of different spatial resolution
+        decoder_channels: A number of convolution filters in ASPP module. Default is 256
+        classes: A number of classes for output mask (or you can think as a number of channels of output mask)
+        activation: An activation function to apply after the final convolution layer.
+            Available options are **"sigmoid"**, **"softmax"**, **"logsoftmax"**, **"tanh"**, **"identity"**,
+                **callable** and **None**.
+            Default is **None**
+        upsampling: Final upsampling factor. Default is 8 to preserve input-output spatial shape identity
+        aux_params: Dictionary with parameters of the auxiliary output (classification head). Auxiliary output is build
+            on top of encoder if **aux_params** is not **None** (default). Supported params:
+                - classes (int): A number of classes
+                - pooling (str): One of "max", "avg". Default is "avg"
+                - dropout (float): Dropout factor in [0, 1)
+                - activation (str): An activation function to apply "sigmoid"/"softmax"
+                    (could be **None** to return logits)
+    Returns:
+        ``torch.nn.Module``: **DeepLabV3**
+
+    .. _DeeplabV3:
+        https://arxiv.org/abs/1706.05587
+
+    """
+
+    def __init__(
+        self,
+        encoder,
+        decoder_channels: int = 256,
+        classes: int = 1,
+        activation: Optional[str] = None,
+        upsampling: int = 8,
+        aux_params: Optional[dict] = None,
+    ):
+        super().__init__(encoder=encoder)
+
+        self.decoder = DeepLabV3Decoder(
+            in_channels=self.encoder.out_channels[-1],
+            out_channels=decoder_channels,
+        )
+
+        self.segmentation_head = SegmentationHead(
+            in_channels=self.decoder.out_channels,
+            out_channels=classes,
+            activation=activation,
+            kernel_size=1,
+            upsampling=upsampling,
+        )
+
+        if aux_params is not None:
+            self.classification_head = ClassificationHead(in_channels=self.encoder.out_channels[-1], **aux_params)
+        else:
+            self.classification_head = None
+
+
 class DeepLabV3Plus(BaseSegmentationModel):
     """DeepLabV3+ implementation from "Encoder-Decoder with Atrous Separable
     Convolution for Semantic Image Segmentation"
@@ -69,6 +127,20 @@ class DeepLabV3Plus(BaseSegmentationModel):
         )
         if aux_params is not None:
             self.classification_head = ClassificationHead(in_channels=self.encoder.out_channels[-1], **aux_params)
+
+
+class DeepLabV3Decoder(nn.Sequential):
+    def __init__(self, in_channels, out_channels=256, atrous_rates=(12, 24, 36)):
+        super().__init__(
+            ASPP(in_channels, out_channels, atrous_rates),
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm3d(out_channels),
+            nn.ReLU(),
+        )
+        self.out_channels = out_channels
+
+    def forward(self, *features):
+        return super().forward(features[-1])
 
 
 class DeepLabV3PlusDecoder(nn.Module):

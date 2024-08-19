@@ -76,7 +76,7 @@ class Unet(BaseSegmentationModel):
             to extract features of different spatial resolution
         encoder_depth: A number of stages used in encoder in range [3, 5]. Each stage generate features
             two times smaller in spatial dimensions than previous one (e.g. for depth 0 we will have features
-            with shapes [(N, C, H, W),], for depth 1 - [(N, C, H, W), (N, C, H // 2, W // 2)] and so on).
+            with shapes [(N, C, D, H, W),], for depth 1 - [(N, C, D, H, W), (N, C, D // 2, H // 2, W // 2)] and so on).
             Default is 5
         decoder_channels: List of integers which specify **in_channels** parameter for convolutions used in decoder.
             Length of the list should be the same as **encoder_depth**

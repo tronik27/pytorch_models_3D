@@ -1,10 +1,9 @@
-from abc import ABC, abstractmethod
 from torch import nn
 import torch
 from typing import List
-from losses.new_segmentation_losses import (MaskFocal, MaskBCE, DiceLoss, TverskyLoss, FocalTverskyLoss, WeightedLoss,
-                                            AdaptiveTvMFDiceLoss)
-from losses.classification_losses import BCELoss, FocalLoss
+from losses.segmentation_losses import (MaskFocal, MaskBCE, DiceLoss, TverskyLoss, FocalTverskyLoss, WeightedLoss,
+                                        AdaptiveTvMFDiceLoss)
+from losses.classification_losses import CELoss, FocalLoss
 
 
 class CombinedClassificationLoss(nn.Module):
@@ -13,8 +12,6 @@ class CombinedClassificationLoss(nn.Module):
             losses: List[str],
             mode: str,
             loss_weights: List[float] = None,
-            mask_weight: float = 1.,
-            mask_pos_weight: float = 1.,
             weights: torch.Tensor = None,
             batchwise: bool = False,
             alpha: float = 0.5,
@@ -22,7 +19,7 @@ class CombinedClassificationLoss(nn.Module):
             gamma: float = 0.5,
     ) -> None:
         """
-        Combined classification loss.
+        Combined classification loss class.
         Args:
             losses:
             mode:
@@ -34,10 +31,16 @@ class CombinedClassificationLoss(nn.Module):
             gamma:
         """
         super().__init__()
-        self.bce = BCELoss(reduction='mean', from_logits=True, pos_weight=weights)
-        self.focal = FocalLoss(reduction='mean', from_logits=True, pos_weight=weights, gamma=gamma)
+        if loss_weights is not None:
+            assert len(loss_weights) == len(losses), \
+                'Number of loss weights must be equal to number of loss functions!'
+            self.loss_weights = loss_weights
+        else:
+            self.loss_weights = [1]*len(losses)
+        self.bce = CELoss(reduction='mean', from_logits=True, pos_weight=weights, mode=mode)
+        self.focal = FocalLoss(reduction='mean', from_logits=True, pos_weight=weights, gamma=gamma, mode=mode)
         self.losses = {
-            'bce': self.bce,
+            'ce_loss': self.bce,
             'focal': self.focal,
         }
         self.use_losses = list()
@@ -50,10 +53,8 @@ class CombinedClassificationLoss(nn.Module):
     def forward(self, pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
         loss = None
         for loss_name, loss_weight in zip(self.use_losses, self.loss_weights):
-            if loss is None:
-                loss = self.losses[loss_name](y_true=gt, y_pred=pred) * loss_weight
-            else:
-                loss += self.losses[loss_name](y_true=gt, y_pred=pred) * loss_weight
+            curr_loss = self.losses[loss_name](y_true=gt, y_pred=pred) * loss_weight
+            loss = curr_loss if loss is None else loss + curr_loss
         return loss
 
 
@@ -63,7 +64,9 @@ class CombinedSegmentationLoss(nn.Module):
             self,
             losses: List[str] or str,
             mode: str,
+            cls_losses: List[str] or str = None,
             loss_weights: List[float] = None,
+            cls_loss_weights: List[float] = None,
             mask_weight: float = 1.,
             mask_pos_weight: float = 1.,
             weights: torch.Tensor = None,
@@ -159,7 +162,7 @@ class CombinedSegmentationLoss(nn.Module):
                 self.use_losses.append(loss_name)
             else:
                 raise NotImplementedError('Unknown type of loss!')
-        self.classification_loss = CombinedClassificationLoss(losses=losses, weights=weights, mode=mode)
+        self.classification_loss = CombinedClassificationLoss(losses=cls_losses, weights=cls_loss_weights, mode=mode)
 
     def forward(
             self,

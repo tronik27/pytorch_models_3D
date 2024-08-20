@@ -48,19 +48,25 @@ class CrossEntropy(ClassificationLoss):
         Cross entropy segmentation loss class.
         """
         super().__init__(pos_weight=pos_weight, ignore_value=ignore_value, reduction=reduction)
-        assert mode in ["binary", "multi-binary"], 'Incorrect task type!'
+        assert mode in ["binary", "multi-binary", "multiclass"], 'Incorrect task type!'
         self.mode = mode
-        if from_logits:
-            self.bce = nn.BCEWithLogitsLoss(reduction='none')
+        if self.mode == "multiclass":
+            if from_logits:
+                self.ce_loss = nn.CrossEntropyLoss(reduction='none')
+            else:
+                raise NotImplementedError
         else:
-            self.bce = nn.BCELoss(reduction='none')
+            if from_logits:
+                self.ce_loss = nn.BCEWithLogitsLoss(reduction='none')
+            else:
+                self.ce_loss = nn.BCELoss(reduction='none')
 
     @abstractmethod
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor):
         pass
 
 
-class BCELoss(CrossEntropy):
+class CELoss(CrossEntropy):
 
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
         """
@@ -69,7 +75,7 @@ class BCELoss(CrossEntropy):
         :param y_true: ground truth.
         """
         y_pred, y_true = self.ignore(y_pred=y_pred, y_true=y_true)
-        loss = self.bce(y_pred, y_true)
+        loss = self.ce_loss(y_pred, y_true)
         loss = self.aggregate_loss(loss=loss)
         return loss
 
@@ -107,7 +113,7 @@ class FocalLoss(CrossEntropy):
         :param y_true: ground truth.
         """
         y_true, y_pred = self.ignore(y_true, y_pred)
-        cent_loss = self.bce(y_pred, y_true)
+        cent_loss = self.ce_loss(y_pred, y_true)
         pt = torch.exp(-cent_loss)
         focal_loss = (1 - pt) ** self.gamma * cent_loss
         focal_loss = self.aggregate_loss(loss=focal_loss)

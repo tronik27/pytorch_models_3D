@@ -116,7 +116,7 @@ class BaseSegmentationModel(nn.Module):
                 new_key = key.replace('model', '').strip('.')
                 new_weights[new_key] = val
 
-        new_weights.pop("criterion.cls_loss.bce.pos_weight", None)
+        new_weights.pop("criterion.cls_loss.ce_loss.pos_weight", None)
         self.load_state_dict(new_weights, strict=False)
 
     def freeze_model(self, freeze_configuration: str):

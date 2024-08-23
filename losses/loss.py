@@ -1,9 +1,10 @@
 from torch import nn
 import torch
 from typing import List
-from losses.segmentation_losses import (MaskFocal, MaskBCE, DiceLoss, TverskyLoss, FocalTverskyLoss, WeightedLoss,
-                                        AdaptiveTvMFDiceLoss)
+from segmentation_losses.ce import Focal, SegmentationCE, WeightedCE
+from segmentation_losses.tversky import TverskyLoss, FocalTverskyLoss
 from losses.classification_losses import CELoss, FocalLoss
+from segmentation_losses.dice import DiceLoss, AdaptiveTvMFDiceLoss
 
 
 class CombinedClassificationLoss(nn.Module):
@@ -99,7 +100,7 @@ class CombinedSegmentationLoss(nn.Module):
             self.loss_weights = loss_weights
         else:
             self.loss_weights = [1]*len(losses)
-        self.segmentation_bce = MaskBCE(
+        self.segmentation_bce = SegmentationCE(
             reduction='mean', from_logits=True, pos_weight=self.heatmap_pos_weights, mode=mode
         )
         self.segmentation_dice_loss = DiceLoss(
@@ -128,13 +129,13 @@ class CombinedSegmentationLoss(nn.Module):
             beta=beta,
             gamma=gamma
         )
-        self.segmentation_focal_loss = MaskFocal(
+        self.segmentation_focal_loss = Focal(
             reduction='mean',
             from_logits=True,
             pos_weight=self.heatmap_pos_weights,
             mode=mode if not mode else mode,
         )
-        self.weighted_loss = WeightedLoss(
+        self.weighted_loss = WeightedCE(
             reduction='mean',
             from_logits=True,
             mode=mode,

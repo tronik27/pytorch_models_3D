@@ -1,11 +1,11 @@
-from typing import Tuple
+from typing import Tuple, Optional
 import torch
 from torch import nn
 
-from base_modules import CrossEntropy
+from base_modules import CrossEntropy, label_smoothed_nll_loss
 
 
-class MaskBCE(CrossEntropy):
+class SegmentationCE(CrossEntropy):
     """Binary cross entropy segmentation loss class."""
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None) -> torch.Tensor:
         """
@@ -14,14 +14,14 @@ class MaskBCE(CrossEntropy):
         :param y_true: ground truth.
         :param filtration_mask: area of interest masks
         """
-        loss = self.bce(y_pred, y_true)
+        loss = self.ce(y_pred, y_true)
         loss = self.filter_uncertain_annotation(data_tensor=loss, gt_mask=y_true)
         loss = self.add_weights(loss=loss, gt_mask=y_true)
         loss = self.roi_filtration(data_tensor=loss, filtration_mask=filtration_mask)
         return self.aggregate_loss(loss=loss, y_true=y_true)
 
 
-class MaskFocal(CrossEntropy):
+class Focal(CrossEntropy):
 
     def __init__(
             self,
@@ -54,7 +54,7 @@ class MaskFocal(CrossEntropy):
         :param y_true: ground truth.
         :param filtration_mask: area of interest masks
         """
-        cent_loss = self.bce(y_pred, y_true)
+        cent_loss = self.ce(y_pred, y_true)
         pt = torch.exp(-cent_loss)
         loss = (1 - pt) ** self.gamma * cent_loss
         loss = self.filter_uncertain_annotation(data_tensor=loss, gt_mask=y_true)
@@ -63,7 +63,7 @@ class MaskFocal(CrossEntropy):
         return self.aggregate_loss(loss=loss, y_true=y_true)
 
 
-class WeightedLoss(CrossEntropy):
+class WeightedCE(CrossEntropy):
     """
     Combined BCE and IoU weighted by gt mask loss function.
     """
@@ -72,7 +72,7 @@ class WeightedLoss(CrossEntropy):
             reduction='mean',
             from_logits=True,
             mode: str = 'binary',
-            ignore_value = -1,
+            ignore_value=-1,
             batchwise=False,
     ) -> None:
         """
@@ -113,7 +113,7 @@ class WeightedLoss(CrossEntropy):
         y_pred = self.filter_uncertain_annotation(data_tensor=y_pred, gt_mask=y_true)
         y_pred = self.roi_filtration(filtration_mask=filtration_mask, data_tensor=y_pred)
 
-        weight = 1 + 5 * torch.abs(nn.functional.avg_pool2d(y_true, kernel_size=31, stride=1, padding=15) - y_true)
+        weight = 1 + 5 * torch.abs(nn.functional.avg_pool3d(y_true, kernel_size=31, stride=1, padding=15) - y_true)
         weighted_bce = self.__bce(y_true=y_true, y_pred=y_pred, weight=weight, dims=dims)
         weighted_iou = self.__iou(y_true=y_true, y_pred=y_pred, weight=weight, dims=dims)
         loss = weighted_iou + weighted_bce
@@ -126,7 +126,7 @@ class WeightedLoss(CrossEntropy):
         """
         Method for weighted  BCE calculation
         """
-        bce = self.bce(y_pred, y_true)
+        bce = self.ce(y_pred, y_true)
         weighted_bce = (weight * bce).sum(dim=dims) / weight.sum(dim=dims)
         return weighted_bce
 
@@ -144,3 +144,118 @@ class WeightedLoss(CrossEntropy):
         weighted_iou = 1 - (inter + 1) / (union - inter + 1)
         return weighted_iou
 
+
+class SoftBCEWithLogitsLoss(nn.Module):
+
+    __constants__ = [
+        "weight",
+        "pos_weight",
+        "reduction",
+        "ignore_index",
+        "smooth_factor",
+    ]
+
+    def __init__(
+        self,
+        weight: Optional[torch.Tensor] = None,
+        ignore_index: Optional[int] = -100,
+        reduction: str = "mean",
+        smooth_factor: Optional[float] = None,
+        pos_weight: Optional[torch.Tensor] = None,
+    ):
+        """Drop-in replacement for torch.nn.BCEWithLogitsLoss with few additions: ignore_index and label_smoothing
+
+        Args:
+            ignore_index: Specifies a target value that is ignored and does not contribute to the input gradient.
+            smooth_factor: Factor to smooth target (e.g. if smooth_factor=0.1 then [1, 0, 1] -> [0.9, 0.1, 0.9])
+
+        Shape
+             - **y_pred** - torch.Tensor of shape NxCxHxW
+             - **y_true** - torch.Tensor of shape NxHxW or Nx1xHxW
+
+        Reference
+            https://github.com/BloodAxe/pytorch-toolbelt
+
+        """
+        super().__init__()
+        self.ignore_index = ignore_index
+        self.reduction = reduction
+        self.smooth_factor = smooth_factor
+        self.register_buffer("weight", weight)
+        self.register_buffer("pos_weight", pos_weight)
+
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            y_pred: torch.Tensor of shape (N, C, H, W)
+            y_true: torch.Tensor of shape (N, H, W)  or (N, 1, H, W)
+
+        Returns:
+            loss: torch.Tensor
+        """
+
+        if self.smooth_factor is not None:
+            soft_targets = (1 - y_true) * self.smooth_factor + y_true * (1 - self.smooth_factor)
+        else:
+            soft_targets = y_true
+
+        loss = F.binary_cross_entropy_with_logits(
+            y_pred,
+            soft_targets,
+            self.weight,
+            pos_weight=self.pos_weight,
+            reduction="none",
+        )
+
+        if self.ignore_index is not None:
+            not_ignored_mask = y_true != self.ignore_index
+            loss *= not_ignored_mask.type_as(loss)
+
+        if self.reduction == "mean":
+            loss = loss.mean()
+
+        if self.reduction == "sum":
+            loss = loss.sum()
+
+        return loss
+
+
+class SoftCrossEntropyLoss(nn.Module):
+
+    __constants__ = ["reduction", "ignore_index", "smooth_factor"]
+
+    def __init__(
+        self,
+        reduction: str = "mean",
+        smooth_factor: Optional[float] = None,
+        ignore_index: Optional[int] = -100,
+        dim: int = 1,
+    ):
+        """Drop-in replacement for torch.nn.CrossEntropyLoss with label_smoothing
+
+        Args:
+            smooth_factor: Factor to smooth target (e.g. if smooth_factor=0.1 then [1, 0, 0] -> [0.9, 0.05, 0.05])
+
+        Shape
+             - **y_pred** - torch.Tensor of shape (N, C, H, W)
+             - **y_true** - torch.Tensor of shape (N, H, W)
+
+        Reference
+            https://github.com/BloodAxe/pytorch-toolbelt
+        """
+        super().__init__()
+        self.smooth_factor = smooth_factor
+        self.ignore_index = ignore_index
+        self.reduction = reduction
+        self.dim = dim
+
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        log_prob = F.log_softmax(y_pred, dim=self.dim)
+        return label_smoothed_nll_loss(
+            log_prob,
+            y_true,
+            epsilon=self.smooth_factor,
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+            dim=self.dim,
+        )

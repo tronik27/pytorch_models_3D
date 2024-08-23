@@ -4,8 +4,6 @@ import math
 
 import torch.nn as nn
 import torch
-from typing import List, Tuple
-from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 import numpy as np
 
@@ -17,7 +15,7 @@ except ImportError:  # py3k
 
 class SegmentationLoss(torch.nn.Module, ABC):
 
-    def __init__(self, ignore_value: float, pos_weight: torch.Tensor):
+    def __init__(self, ignore_value: float, pos_weight: torch.Tensor, reduction: str):
         """
         Base segmentation loss function class
         Args:
@@ -27,6 +25,7 @@ class SegmentationLoss(torch.nn.Module, ABC):
         super().__init__()
         self.ignore_value = ignore_value
         self.pos_weight = pos_weight
+        self.reduction = reduction
 
     @abstractmethod
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None):
@@ -52,7 +51,7 @@ class SegmentationLoss(torch.nn.Module, ABC):
         if self.pos_weight is not None:
             weight = self.pos_weight.repeat(
                 gt_mask.shape[0], gt_mask.shape[2], gt_mask.shape[3], gt_mask.shape[4], 1
-            ).permute((0, 3, 1, 2))
+            ).permute((0, 4, 1, 2, 3))
             weight = weight.to(gt_mask.device)
             weight = weight * gt_mask + (1 - gt_mask)
             return loss * weight
@@ -87,9 +86,8 @@ class CrossEntropy(SegmentationLoss):
         """
         Cross entropy segmentation loss class.
         """
-        super().__init__(pos_weight=pos_weight, ignore_value=ignore_value)
-        self.reduction = reduction
-        assert mode in ["binary", "multi-binary", 'multilabel'], 'Incorrect task type!'
+        super().__init__(pos_weight=pos_weight, ignore_value=ignore_value, reduction=reduction)
+        assert mode in ["binary", "multilabel", 'multiclass'], 'Incorrect task type!'
         self.mode = mode
         if self.mode == 'multilabel':
             self.ce = nn.CrossEntropyLoss(reduction='none')

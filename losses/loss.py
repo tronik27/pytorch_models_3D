@@ -20,16 +20,33 @@ class CombinedClassificationLoss(nn.Module):
             gamma: float = 0.5,
     ) -> None:
         """
-        Combined classification loss class.
+        Combined loss function class for classification tasks.
+
+        This class combines multiple classification loss functions, allowing for a weighted sum of different losses.
+
         Args:
-            losses:
-            mode:
-            loss_weights:
-            weights:
-            batchwise:
-            alpha:
-            beta:
-            gamma:
+            losses (List[str]): List of loss function names to be used.
+            mode (str): The mode of operation ('binary', 'multiclass', or 'multilabel').
+            loss_weights (List[float], optional): Weights for each loss function. If None, equal weights are used.
+            weights (torch.Tensor, optional): Class weights for imbalanced datasets.
+            batchwise (bool): If True, compute loss batchwise. Defaults to False.
+            alpha (float): Parameter for Focal Tversky Loss. Defaults to 0.5.
+            beta (float): Parameter for Focal Tversky Loss. Defaults to 0.5.
+            gamma (float): Focal parameter for Focal Loss and Focal Tversky Loss. Defaults to 0.5.
+
+        Attributes:
+            loss_weights (List[float]): Weights for each loss function.
+            bce (CELoss): Binary Cross Entropy loss instance.
+            focal (FocalLoss): Focal Loss instance.
+            losses (dict): Dictionary mapping loss names to their respective instances.
+            use_losses (list): List of loss names to be used in forward pass.
+
+        Raises:
+            NotImplementedError: If an unknown loss type is specified.
+
+        Note:
+            The class currently supports 'ce_loss' (Cross Entropy) and 'focal' (Focal Loss).
+            Additional loss functions can be added to the `losses` dictionary as needed.
         """
         super().__init__()
         if loss_weights is not None:
@@ -77,19 +94,32 @@ class CombinedSegmentationLoss(nn.Module):
             gamma: float = 0.5,
     ) -> None:
         """
-        Combined loss function class for segmentation.
+        Combined loss function class for segmentation tasks.
+
+        This class combines multiple loss functions for segmentation, allowing for a flexible
+        and customizable approach to training segmentation models.
+
         Args:
-            losses: list of loss names
-            mode: loss mode (binary, multibinary).
-            loss_weights:
-            mask_weight:
-            mask_pos_weight:
-            weights: positive class weights for classification loss. Must be a vector with length equal to the number
-        of classes.
-            batchwise:
-            alpha:
-            beta:
-            gamma:
+            losses (List[str] or str): List of loss function names or a single loss function name.
+            mode (str): Loss mode, either 'binary' or 'multibinary'.
+            cls_losses (List[str] or str, optional): List of classification loss names or a single loss name.
+            loss_weights (List[float], optional): Weights for each segmentation loss function. 
+                Must match the length of 'losses' if provided.
+            cls_loss_weights (List[float], optional): Weights for each classification loss function.
+                Must match the length of 'cls_losses' if provided.
+            mask_weight (float, default=1.): Weight for the segmentation mask loss.
+            mask_pos_weight (float, default=1.): Positive class weight for the segmentation mask.
+            weights (torch.Tensor, optional): Positive class weights for classification loss. 
+                Must be a vector with length equal to the number of classes.
+            batchwise (bool, default=False): If True, compute loss batchwise.
+            alpha (float, default=0.5): Parameter for Tversky and Focal Tversky losses.
+            beta (float, default=0.5): Parameter for Tversky and Focal Tversky losses.
+            gamma (float, default=0.5): Focusing parameter for Focal and Focal Tversky losses.
+
+        Note:
+            - The class supports various segmentation losses including BCE, Dice, Tversky, and Focal losses.
+            - Classification losses can be added separately using the 'cls_losses' parameter.
+            - Ensure that the provided loss names are implemented in the class.
         """
         super(CombinedSegmentationLoss, self).__init__()
         self.heatmap_weight = torch.as_tensor(mask_weight)
@@ -174,13 +204,21 @@ class CombinedSegmentationLoss(nn.Module):
             filtration: torch.Tensor = None
     ) -> torch.Tensor:
         """
-        Method for calculating the value of the loss function.
-        :param classification_pred: predicted class labels.
-        :param pred_mask: predicted class labels.
-        :param gt: ground truth masks.
-        :param classification_gt: ground truth labels.
-        :param filtration: area of interest masks.
-        :return calculated loss value
+        Calculate the combined loss for classification and segmentation tasks.
+
+        Args:
+            classification_pred (torch.Tensor): Predicted class probabilities or logits.
+            pred_mask (torch.Tensor or List[torch.Tensor]): Predicted segmentation mask(s).
+            gt (torch.Tensor): Ground truth segmentation masks.
+            classification_gt (torch.Tensor): Ground truth classification labels.
+            filtration (torch.Tensor, optional): Mask for filtering regions of interest. Defaults to None.
+
+        Returns:
+            torch.Tensor: Combined loss value for classification and segmentation tasks.
+
+        Note:
+            - If pred_mask is a list, the segmentation loss is computed for each mask and summed.
+            - The final loss is a weighted sum of classification and segmentation losses.
         """
         cls_loss = self.classification_loss(pred=classification_pred, y_true=classification_gt)
         pred_mask = pred_mask if isinstance(pred_mask, list) else [pred_mask]
@@ -194,11 +232,23 @@ class CombinedSegmentationLoss(nn.Module):
             self, pred_mask: torch.Tensor, gt_mask: torch.Tensor, filtration_mask: torch.Tensor = None
     ) -> torch.Tensor:
         """
-        Method for calculating the value of the segmentation loss function.
-        :param pred_mask: predicted segmentation masks.
-        :param gt_mask: ground truth masks.
-        :param filtration_mask: area of interest masks.
-        :return calculated loss value
+        Calculate the segmentation loss function value.
+
+        This method computes the segmentation loss by combining multiple loss functions
+        as specified in self.use_losses, with their corresponding weights.
+
+        Args:
+            pred_mask (torch.Tensor): Predicted segmentation mask.
+            gt_mask (torch.Tensor): Ground truth segmentation mask.
+            filtration_mask (torch.Tensor, optional): Mask for filtering regions of interest.
+
+        Returns:
+            torch.Tensor: Calculated segmentation loss value.
+
+        Note:
+            The final loss is a weighted sum of individual loss functions specified
+            in self.use_losses. If only one loss function is used, its value is
+            returned directly.
         """
         loss = None
         for loss_name, loss_weight in zip(self.use_losses, self.loss_weights):

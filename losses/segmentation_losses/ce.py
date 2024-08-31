@@ -7,7 +7,7 @@ from base_modules import CrossEntropy, label_smoothed_nll_loss
 
 
 class SegmentationCE(CrossEntropy):
-    """Binary cross entropy segmentation loss class."""
+    """Cross entropy segmentation loss class."""
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None) -> torch.Tensor:
         """
         Method for loss value calculation.
@@ -34,14 +34,28 @@ class Focal(CrossEntropy):
             gamma=2,
     ) -> None:
         """
-        Focal binary cross entropy segmentation loss class.
+        Focal cross entropy segmentation loss class.
+
+        This class implements the focal loss, which is designed to address class imbalance issues
+        in segmentation tasks by down-weighting well-classified examples.
+
         Args:
-            pos_weight:
-            reduction:
-            from_logits:
-            mode:
-            ignore_value:
-            gamma:
+            pos_weight (torch.Tensor, optional): A weight of positive examples. Must be a vector with length
+                equal to the number of classes. Default: None
+            reduction (str): Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+                'none': no reduction will be applied, 'mean': the sum of the output will be divided by
+                the number of elements in the output, 'sum': the output will be summed. Default: 'mean'
+            from_logits (bool): If True, assumes input is raw logits. If False, assumes input is probabilities.
+                Default: True
+            mode (str): Specifies the task type: 'binary' | 'multilabel' | 'multiclass'. Default: 'binary'
+            ignore_value (float): Specifies a target value that is ignored and does not contribute to the
+                input gradient. Default: -1
+            gamma (float): Focusing parameter for focal loss. Higher gamma increases focus on hard examples.
+                Default: 2
+
+        Note:
+            The focal loss is defined as: FL(pt) = -alpha_t * (1 - pt)^gamma * log(pt)
+            where pt is the model's estimated probability for the target class.
         """
         super().__init__(
             reduction=reduction, pos_weight=pos_weight, mode=mode, ignore_value=ignore_value, from_logits=from_logits
@@ -50,10 +64,27 @@ class Focal(CrossEntropy):
 
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None) -> torch.Tensor:
         """
-        Method for focal loss value calculation.
-        :param y_pred: model predicted output.
-        :param y_true: ground truth.
-        :param filtration_mask: area of interest masks
+        Calculate the focal loss value.
+
+        This method computes the focal loss, which is designed to address class imbalance
+        by down-weighting well-classified examples.
+
+        Args:
+            y_pred (torch.Tensor): The model's predicted output. Shape should be (N, C, ...) where N is
+                                   the batch size and C is the number of classes.
+            y_true (torch.Tensor): The ground truth labels. Shape should match y_pred or be (N, ...) for
+                                   class indices.
+            filtration_mask (torch.Tensor, optional): Mask for filtering regions of interest. Should have
+                                                      the same spatial dimensions as y_pred and y_true.
+
+        Returns:
+            torch.Tensor: The computed focal loss.
+
+        Note:
+            - The focal loss is defined as: FL(pt) = -alpha_t * (1 - pt)^gamma * log(pt)
+              where pt is the model's estimated probability for the target class.
+            - This implementation applies additional processing steps such as filtering
+              uncertain annotations and region of interest filtration.
         """
         cent_loss = self.ce(y_pred, y_true)
         pt = torch.exp(-cent_loss)
@@ -75,13 +106,25 @@ class WeightedCE(CrossEntropy):
             batchwise=False,
     ) -> None:
         """
-        Combined CE and IoU weighted by gt mask loss function.
+        Weighted Cross-Entropy and IoU Loss.
+
+        This loss function combines Cross-Entropy (CE) and Intersection over Union (IoU) losses,
+        weighted by the ground truth mask. It's designed to handle class imbalance and improve
+        segmentation accuracy, especially for small or difficult objects.
+
         Args:
-            reduction:
-            from_logits:
-            mode:
-            ignore_value:
-            batchwise:
+            reduction (str): Specifies the reduction to apply to the output.
+                Options: 'none' | 'mean' | 'sum'. Default: 'mean'.
+            from_logits (bool): If True, assumes input is raw logits. Default: True.
+            mode (str): Specifies the mode of operation.
+                Options: 'binary' | 'multi-binary' | 'multiclass'. Default: 'binary'.
+            ignore_value (int): Specifies a target value that is ignored and does not contribute to the input gradient.
+                Default: -1.
+            batchwise (bool): If True, computes the loss across the batch. Default: False.
+
+        Note:
+            - The weighting is applied to CE using IoU.
+            - This loss is particularly useful for segmentation tasks with imbalanced classes or small objects.
         """
         super().__init__(
             reduction=reduction, mode=mode, ignore_value=ignore_value, from_logits=from_logits
@@ -115,6 +158,11 @@ class WeightedCE(CrossEntropy):
         if self.mode == "multi-binary":
             y_true = y_true.view(batch_size, num_classes, -1)
             y_pred = y_pred.view(batch_size, num_classes, -1)
+        
+        if self.mode == "multiclass":
+            y_true = F.one_hot(y_true.long(), num_classes=num_classes).permute(0, 4, 1, 2, 3).float()
+            y_true = y_true.view(batch_size, num_classes, -1)
+            y_pred = y_pred.view(batch_size, num_classes, -1)
 
         y_true = self.filter_uncertain_annotation(data_tensor=y_true, gt_mask=y_true)
         y_true = self.roi_filtration(filtration_mask=filtration_mask, data_tensor=y_true)
@@ -123,17 +171,31 @@ class WeightedCE(CrossEntropy):
         y_pred = self.roi_filtration(filtration_mask=filtration_mask, data_tensor=y_pred)
 
         weight = 1 + 5 * torch.abs(nn.functional.avg_pool3d(y_true, kernel_size=31, stride=1, padding=15) - y_true)
-        weighted_bce = self.__bce(y_true=y_true, y_pred=y_pred, weight=weight, dims=dims)
+        weighted_bce = self.__ce(y_true=y_true, y_pred=y_pred, weight=weight, dims=dims)
         weighted_iou = self.__iou(y_true=y_true, y_pred=y_pred, weight=weight, dims=dims)
         loss = weighted_iou + weighted_bce
 
         return self.aggregate_loss(loss=loss, y_true=gt)
 
-    def __bce(
+    def __ce(
             self, y_pred: torch.Tensor, y_true: torch.Tensor, weight: torch.Tensor, dims: int or Tuple[int, int]
     ) -> torch.Tensor:
         """
-        Method for weighted  BCE calculation
+        Compute the weighted Cross Entropy (CE) loss.
+
+        Args:
+            y_pred (torch.Tensor): Predicted values, shape (N, C, *).
+            y_true (torch.Tensor): Ground truth values, shape (N, C, *).
+            weight (torch.Tensor): Weight tensor for each sample, shape (N, C, *).
+            dims (int or Tuple[int, ...]): Dimensions to reduce when computing the loss.
+
+        Returns:
+            torch.Tensor: Weighted BCE loss.
+
+        Note:
+            This method calculates the CE loss and applies the provided weights.
+            The weighted loss is then summed over the specified dimensions and
+            normalized by the sum of weights.
         """
         bce = self.ce(y_pred, y_true)
         weighted_bce = (weight * bce).sum(dim=dims) / weight.sum(dim=dims)
@@ -143,7 +205,21 @@ class WeightedCE(CrossEntropy):
             self, y_pred: torch.Tensor, y_true: torch.Tensor, weight: torch.Tensor, dims: int or Tuple[int, int]
     ) -> torch.Tensor:
         """
-        Method for iou calculation
+        Compute the weighted Intersection over Union (IoU) loss.
+
+        Args:
+            y_pred (torch.Tensor): Predicted values, shape (N, C, *).
+            y_true (torch.Tensor): Ground truth values, shape (N, C, *).
+            weight (torch.Tensor): Weight tensor for each sample, shape (N, C, *).
+            dims (int or Tuple[int, ...]): Dimensions to reduce when computing the loss.
+
+        Returns:
+            torch.Tensor: Weighted IoU loss.
+
+        Note:
+            This method calculates the IoU loss and applies the provided weights.
+            The predicted values are passed through a sigmoid function if self.from_logits is True.
+            The weighted loss is computed as 1 - (weighted intersection + 1) / (weighted union - weighted intersection + 1).
         """
         if self.from_logits:
             y_pred = torch.sigmoid(y_pred)

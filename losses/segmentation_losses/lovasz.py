@@ -26,8 +26,8 @@ class LovaszLoss(SegmentationLoss):
             per_image: If True loss computed per each image and then averaged, else computed per whole batch
 
         Shape
-             - **y_pred** - torch.Tensor of shape (N, C, H, W)
-             - **y_true** - torch.Tensor of shape (N, H, W) or (N, C, H, W)
+             - **y_pred** - torch.Tensor of shape (N, C, D, H, W)
+             - **y_true** - torch.Tensor of shape (N, D, H, W) or (N, C, D, H, W)
 
         Reference
             https://github.com/BloodAxe/pytorch-toolbelt
@@ -40,7 +40,22 @@ class LovaszLoss(SegmentationLoss):
         self.per_image = per_image
 
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None):
+        """
+        Forward pass for the Lovasz Loss.
 
+        Args:
+            y_pred (torch.Tensor): Predicted tensor of shape (N, C, H, W).
+            y_true (torch.Tensor): Ground truth tensor of shape (N, H, W) or (N, C, H, W).
+            filtration_mask (torch.Tensor, optional): Mask for filtering specific regions. Default is None.
+
+        Returns:
+            torch.Tensor: Computed Lovasz loss.
+
+        Note:
+            - For binary and multi-binary modes, uses Lovasz-Hinge loss.
+            - For multiclass mode, uses Lovasz-Softmax loss.
+            - The loss is computed per image if self.per_image is True, otherwise per batch.
+        """
         if self.mode in ["binary", "multi-binary"]:
             loss = _lovasz_hinge(y_pred, y_true, per_image=self.per_image, ignore=self.ignore_index)
         elif self.mode == "multiclass":

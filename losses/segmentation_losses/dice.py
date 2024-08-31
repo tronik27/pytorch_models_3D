@@ -52,6 +52,22 @@ class DiceLoss(SegmentationLoss, _Loss):
         self.bacthwise = batchwise
 
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None):
+        """
+        Forward pass for computing the Dice loss.
+
+        Args:
+            y_pred (torch.Tensor): The predicted segmentation map, shape (N, C, D, H, W).
+            y_true (torch.Tensor): The ground truth segmentation map, shape (N, D, H, W) or (N, C, D, H, W).
+            filtration_mask (torch.Tensor, optional): A binary mask for filtering regions of interest, shape (N, 1, D, H, W).
+
+        Returns:
+            torch.Tensor: The computed Dice loss.
+
+        Note:
+            - If `from_logits` is True, sigmoid is applied to `y_pred`.
+            - The method handles binary, multi-binary, and multiclass segmentation.
+            - Uncertain annotations and regions outside the filtration mask are handled as per the base class methods.
+        """
 
         assert y_true.size(0) == y_pred.size(0)
 
@@ -71,6 +87,13 @@ class DiceLoss(SegmentationLoss, _Loss):
         if self.mode == "multi-binary":
             y_true = y_true.view(batch_size, num_classes, -1)
             y_pred = y_pred.view(batch_size, num_classes, -1)
+            
+        if self.mode == "multiclass":
+            y_true = F.one_hot(y_true.long(), num_classes=num_classes).permute(0, 4, 1, 2, 3).float()
+            y_true = y_true.view(batch_size, num_classes, -1)
+            y_pred = y_pred.view(batch_size, num_classes, -1)
+
+        assert y_true.shape == y_pred.shape, f"Got differing shapes for y_true ({y_true.shape}) and y_pred ({y_pred.shape})"
 
         y_true = self.filter_uncertain_annotation(data_tensor=y_true, gt_mask=y_true)
         y_true = self.add_weights(loss=y_true, gt_mask=y_true)
@@ -93,11 +116,20 @@ class DiceLoss(SegmentationLoss, _Loss):
 
     def compute_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, dims: int or Tuple[int, int]) -> torch.Tensor:
         """
-        Method for dice score computation.
-        :param y_pred:
-        :param y_true:
-        :param dims:
-        :return tensor with computed dice loss value.
+        Compute the Dice loss between predicted and true segmentation masks.
+
+        Args:
+            y_pred (torch.Tensor): Predicted segmentation mask.
+            y_true (torch.Tensor): Ground truth segmentation mask.
+            dims (int or Tuple[int, int]): Dimensions along which to compute the Dice loss.
+
+        Returns:
+            torch.Tensor: Computed Dice loss.
+
+        Note:
+            - The method handles smoothing to avoid division by zero.
+            - It can compute log loss if specified during initialization.
+            - The loss is clipped to valid ranges and NaN values are handled.
         """
         intersection = y_pred * y_true
         cardinality = (y_pred + y_true)
@@ -119,6 +151,25 @@ class DiceLoss(SegmentationLoss, _Loss):
 
     @staticmethod
     def __to_tensor(x, dtype=None) -> torch.Tensor:
+        """
+        Convert input to PyTorch tensor.
+
+        This method converts various input types (torch.Tensor, numpy.ndarray, list, tuple)
+        to a PyTorch tensor. If a specific dtype is provided, the resulting tensor
+        will be cast to that dtype.
+
+        Args:
+            x: Input data to be converted to tensor. Can be a torch.Tensor,
+               numpy.ndarray, list, or tuple.
+            dtype: Optional. The desired data type of the output tensor.
+
+        Returns:
+            torch.Tensor: The input data converted to a PyTorch tensor.
+
+        Note:
+            If the input is already a torch.Tensor and no dtype is specified,
+            the input is returned unchanged.
+        """
         if isinstance(x, torch.Tensor):
             if dtype is not None:
                 x = x.type(dtype)
@@ -178,6 +229,20 @@ class AdaptiveTvMFDiceLoss(DiceLoss):
             raise NotImplementedError('AdaptiveTvMFDiceLoss implemented only for imagewise loss calculation!')
 
     def compute_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, dims: int) -> torch.Tensor:
+        """
+        Compute the Adaptive TvMF Dice Loss.
+
+        This method calculates the loss using a cosine similarity-based approach,
+        which is then adjusted by the kappa parameter to penalize false positives.
+
+        Args:
+            y_pred (torch.Tensor): The predicted segmentation map.
+            y_true (torch.Tensor): The ground truth segmentation map.
+            dims (int): The dimension along which to compute the loss.
+
+        Returns:
+            torch.Tensor: The computed loss value.
+        """
         y_pred = nn.functional.normalize(y_pred, p=2, dim=dims)
         y_true = nn.functional.normalize(y_true, p=2, dim=dims)
         cosine = torch.sum(y_pred * y_true, dim=dims)

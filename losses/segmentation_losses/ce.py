@@ -1,6 +1,7 @@
 from typing import Tuple, Optional
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from base_modules import CrossEntropy, label_smoothed_nll_loss
 
@@ -64,9 +65,7 @@ class Focal(CrossEntropy):
 
 
 class WeightedCE(CrossEntropy):
-    """
-    Combined BCE and IoU weighted by gt mask loss function.
-    """
+
     def __init__(
             self,
             reduction='mean',
@@ -76,7 +75,13 @@ class WeightedCE(CrossEntropy):
             batchwise=False,
     ) -> None:
         """
-        Focal binary cross entropy segmentation loss class.
+        Combined CE and IoU weighted by gt mask loss function.
+        Args:
+            reduction:
+            from_logits:
+            mode:
+            ignore_value:
+            batchwise:
         """
         super().__init__(
             reduction=reduction, mode=mode, ignore_value=ignore_value, from_logits=from_logits
@@ -87,9 +92,13 @@ class WeightedCE(CrossEntropy):
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None) -> torch.Tensor:
         """
         Method for focal loss value calculation.
-        :param y_pred: model predicted output.
-        :param y_true: ground truth.
-        :param filtration_mask: area of interest masks
+        Args:
+            y_pred: model predicted output.
+            y_true: ground truth.
+            filtration_mask: area of interest masks
+
+        Returns:
+
         """
         batch_size = y_true.size(0)
         num_classes = y_pred.size(1)

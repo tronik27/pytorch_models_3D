@@ -19,7 +19,7 @@ class SegmentationLoss(torch.nn.Module, ABC):
         """
         Base segmentation loss function class
         Args:
-            ignore_value:
+            ignore_value: value to beignored when loss calculated.
             pos_weight:
         """
         super().__init__()
@@ -34,9 +34,13 @@ class SegmentationLoss(torch.nn.Module, ABC):
     def filter_uncertain_annotation(self, data_tensor: torch.Tensor, gt_mask: torch.Tensor) -> torch.Tensor:
         """
         Method for ignoring uncertain annotated masks.
-        :param data_tensor: data value tensor.
-        :param gt_mask: ground truth masks.
-        :return filtered loss tensor value.
+
+        Args:
+            data_tensor (torch.Tensor): Data value tensor.
+            gt_mask (torch.Tensor): Ground truth masks.
+
+        Returns:
+            torch.Tensor: Filtered loss tensor value.
         """
         ignore = (gt_mask != self.ignore_value).float()
         return data_tensor * ignore
@@ -44,9 +48,13 @@ class SegmentationLoss(torch.nn.Module, ABC):
     def add_weights(self, loss: torch.Tensor, gt_mask: torch.Tensor) -> torch.Tensor:
         """
         Method for weighting loss value.
-        :param loss: loss value tensor.
-        :param gt_mask: ground truth masks.
-        :return weighted loss tensor value.
+
+        Args:
+            loss (torch.Tensor): Loss value tensor.
+            gt_mask (torch.Tensor): Ground truth masks.
+
+        Returns:
+            torch.Tensor: Weighted loss tensor value.
         """
         if self.pos_weight is not None:
             weight = self.pos_weight.repeat(
@@ -61,9 +69,13 @@ class SegmentationLoss(torch.nn.Module, ABC):
     def aggregate_loss(self, loss: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
         """
         Method for loss value aggregation by loss tensor reduction.
-        :param loss: loss value tensor.
-        :param y_true: ground truth tensor.
-        return reduced loss value tensor.
+
+        Args:
+            loss (torch.Tensor): Loss value tensor.
+            y_true (torch.Tensor): Ground truth tensor.
+
+        Returns:
+            torch.Tensor: Reduced loss value tensor.
         """
         loss = self.ignore(y_true=y_true, loss=loss)
         if self.reduction == 'mean':
@@ -74,6 +86,16 @@ class SegmentationLoss(torch.nn.Module, ABC):
 
     @staticmethod
     def roi_filtration(filtration_mask: torch.Tensor, data_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Method for filtering the data tensor based on a given filtration mask.
+
+        Args:
+            filtration_mask (torch.Tensor): A binary mask used for filtering. If None, no filtration is applied.
+            data_tensor (torch.Tensor): The input data tensor to be filtered.
+
+        Returns:
+            torch.Tensor: The filtered data tensor. If filtration_mask is None, returns the original data_tensor.
+        """
         if filtration_mask is not None:
             data_tensor = data_tensor * filtration_mask
         return data_tensor
@@ -85,6 +107,17 @@ class CrossEntropy(SegmentationLoss):
     ) -> None:
         """
         Cross entropy segmentation loss class.
+
+        Args:
+            pos_weight (torch.Tensor, optional): A weight of positive examples. Must be a vector with length equal to the
+                number of classes. Default: None
+            reduction (str): Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+                'none': no reduction will be applied, 'mean': the sum of the output will be divided by the number of
+                elements in the output, 'sum': the output will be summed. Default: 'mean'
+            from_logits (bool): If True, assumes input is raw logits. If False, assumes input is probabilities. Default: True
+            mode (str): Specifies the task type: 'binary' | 'multilabel' | 'multiclass'. Default: 'binary'
+            ignore_value (float): Specifies a target value that is ignored and does not contribute to the input gradient.
+                Default: -1
         """
         super().__init__(pos_weight=pos_weight, ignore_value=ignore_value, reduction=reduction)
         assert mode in ["binary", "multilabel", 'multiclass'], 'Incorrect task type!'

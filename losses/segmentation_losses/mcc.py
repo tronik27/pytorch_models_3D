@@ -16,23 +16,46 @@ class MCCLoss(CustomLoss):
             mode: str = 'binary',
             classes: List[int] = None
     ):
-        """Compute Matthews Correlation Coefficient Loss for image segmentation task.
-        It only supports binary mode.
 
-        Args:
-            eps (float): Small epsilon to handle situations where all the samples in the dataset belong to one class
-
-        Reference:
-            https://github.com/kakumarabhishek/MCC-Loss
         """
+        Implementation of Matthews Correlation Coefficient (MCC) loss.
 
+        Parameters
+        ----------
+        eps : float, optional
+            A small epsilon for numerical stability to avoid division by zero.
+            Defaults to 1e-5.
+        ignore_value : float, optional
+            A target value that is ignored and does not contribute to the input gradient.
+            Defaults to -1.
+        pos_weight : torch.Tensor, optional
+            A weight tensor for positive examples. Must be a vector with length equal to the
+            number of classes. If None, all weights are set to 1.
+            Defaults to None.
+        reduction : str, optional
+            Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+            Defaults to 'mean'.
+        batchwise : bool, optional
+            If True, computes loss batchwise.
+            Defaults to False.
+        from_logits : bool, optional
+            If True, assumes input is raw logits.
+            Defaults to True.
+        mode : str, optional
+            Specifies the task type: 'binary' | 'multi-binary' | 'multiclass'.
+            Defaults to 'binary'.
+        classes : List[int], optional
+            List of classes that contribute in loss computation. By default, all channels are included.
+            Defaults to None.
+        """
         super().__init__(
             ignore_value=ignore_value,
             pos_weight=pos_weight,
             reduction=reduction,
             from_logits=from_logits,
             mode=mode,
-            classes=classes
+            classes=classes,
+            batchwise=batchwise
         )
         self.eps = eps
 

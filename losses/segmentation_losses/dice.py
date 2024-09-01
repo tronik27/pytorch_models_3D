@@ -43,12 +43,12 @@ class DiceLoss(CustomLoss):
             ignore_value=ignore_value,
             reduction=reduction,
             classes=classes,
-            mode=mode
+            mode=mode,
+            batchwise=batchwise
         )
         self.smooth = smooth
         self.eps = eps
         self.log_loss = log_loss
-        self.bacthwise = batchwise
 
     def compute_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, dims: int or Tuple[int, int]) -> torch.Tensor:
         """

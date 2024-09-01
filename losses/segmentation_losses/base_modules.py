@@ -144,7 +144,8 @@ class CustomLoss(SegmentationLoss, ABC, _Loss):
             ignore_value: float,
             mode: str,
             classes: list,
-            pos_weight: torch.Tensor
+            pos_weight: torch.Tensor,
+            batchwise: bool = False
     ) -> None:
         """
         Abstract class for custom segmentation loss functions.
@@ -163,6 +164,7 @@ class CustomLoss(SegmentationLoss, ABC, _Loss):
             assert mode != "binary", "Masking num_classes is not supported with mode=binary"
             classes = self.__to_tensor(classes, dtype=torch.long)
         self.classes = classes
+        self.batchwise = batchwise
 
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None):
         """
@@ -171,7 +173,8 @@ class CustomLoss(SegmentationLoss, ABC, _Loss):
         Args:
             y_pred (torch.Tensor): The predicted segmentation map, shape (N, C, D, H, W).
             y_true (torch.Tensor): The ground truth segmentation map, shape (N, D, H, W) or (N, C, D, H, W).
-            filtration_mask (torch.Tensor, optional): A binary mask for filtering regions of interest, shape (N, 1, D, H, W).
+            filtration_mask (torch.Tensor, optional):
+            A binary mask for filtering regions of interest, shape (N, 1, D, H, W).
 
         Returns:
             torch.Tensor: The computed Dice loss.

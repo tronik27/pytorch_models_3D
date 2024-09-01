@@ -14,7 +14,6 @@ class TverskyLoss(DiceLoss):
             smooth: float = 0.0,
             pos_weight: torch.Tensor = None,
             ignore_value: float = -1,
-            ignore_mask: bool = False,
             batchwise=False,
             eps: float = 1e-7,
             alpha: float = 0.5,
@@ -39,7 +38,7 @@ class TverskyLoss(DiceLoss):
             loss: torch.Tensor
         """
         super().__init__(
-            mode=mode, classes=classes, log_loss=log_loss, from_logits=from_logits, ignore_mask=ignore_mask,
+            mode=mode, classes=classes, log_loss=log_loss, from_logits=from_logits,
             smooth=smooth, ignore_value=ignore_value, batchwise=batchwise, eps=eps, pos_weight=pos_weight
         )
         self.alpha = alpha
@@ -104,7 +103,6 @@ class FocalTverskyLoss(DiceLoss):
             smooth: float = 0.0,
             pos_weight: torch.Tensor = None,
             ignore_value: float = -1,
-            ignore_mask: bool = False,
             batchwise=False,
             eps: float = 1e-7,
             alpha: float = 0.5,
@@ -132,7 +130,6 @@ class FocalTverskyLoss(DiceLoss):
             smooth (float): Smoothing factor to avoid division by zero. Defaults to 0.0.
             pos_weight (torch.Tensor, optional): Weights for positive examples. Defaults to None.
             ignore_value (float): Label value to ignore in loss computation. Defaults to -1.
-            ignore_mask (bool): If True, ignore certain regions in the mask. Defaults to False.
             batchwise (bool): If True, compute loss batchwise. Defaults to False.
             eps (float): Small epsilon for numerical stability. Defaults to 1e-7.
             alpha (float): Weight for false positives. Defaults to 0.5.
@@ -144,7 +141,7 @@ class FocalTverskyLoss(DiceLoss):
             - Increasing gamma puts more focus on hard examples, potentially improving performance on difficult cases.
         """
         super().__init__(
-            mode=mode, classes=classes, log_loss=log_loss, from_logits=from_logits, ignore_mask=ignore_mask,
+            mode=mode, classes=classes, log_loss=log_loss, from_logits=from_logits,
             smooth=smooth, ignore_value=ignore_value, batchwise=batchwise, eps=eps, pos_weight=pos_weight
         )
         self.alpha = alpha

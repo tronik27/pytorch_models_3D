@@ -70,6 +70,10 @@ def _lovasz_grad(gt_sorted):
     """Compute gradient of the Lovasz extension w.r.t sorted errors
     See Alg. 1 in paper
     """
+    """
+    See "The Lovasz-Softmax Loss: A Tractable Surrogate for the Optimization of the Intersection-Over-Union Measure in Neural Networks"
+    https://arxiv.org/abs/1705.08790
+    """
     p = len(gt_sorted)
     gts = gt_sorted.sum()
     intersection = gts - gt_sorted.float().cumsum(0)
@@ -187,7 +191,17 @@ def _lovasz_softmax_flat(probas, labels, classes="present"):
 
 
 def _flatten_probas(probas, labels, ignore=None):
-    """Flattens predictions in the batch"""
+    """
+    Flattens predictions in the batch
+
+    Args:
+        probas: [B, C, H, W] Class probabilities at each prediction (between 0 and 1)
+        labels: [B, H, W] Tensor, ground truth labels (between 0 and C - 1)
+        ignore: label to ignore
+
+    Returns:
+        tuple: (probas, labels)
+    """
     if probas.dim() == 3:
         # assumes output of a sigmoid layer
         B, H, W = probas.size()
@@ -212,7 +226,17 @@ def isnan(x):
 
 
 def mean(values, ignore_nan=False, empty=0):
-    """Nanmean compatible with generators."""
+    """
+    Compute the mean of values.
+
+    Args:
+        values: iterable of numbers
+        ignore_nan: if True, ignore NaN values
+        empty: value to return if the sequence is empty. Default is 0.
+
+    Returns:
+        mean of values as a float
+    """
     values = iter(values)
     if ignore_nan:
         values = ifilterfalse(isnan, values)

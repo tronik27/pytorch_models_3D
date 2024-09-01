@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Tuple
 import math
 
 import torch.nn as nn
+from torch.nn.modules.loss import _Loss
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -135,7 +136,123 @@ class CrossEntropy(SegmentationLoss):
         pass
 
 
+class CustomLoss(SegmentationLoss, ABC, _Loss):
+    def __init__(
+            self,
+            reduction: str,
+            from_logits: bool,
+            ignore_value: float,
+            mode: str,
+            classes: list,
+            pos_weight: torch.Tensor
+    ) -> None:
+        """
+        Abstract class for custom segmentation loss functions.
+        Args:
+            reduction: Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+            from_logits: If True, assumes input is raw logits. If False, assumes input is probabilities.
+            ignore_value: Specifies a target value that is ignored and does not contribute to the input gradient.
+            mode: Specifies the task type: 'binary' | 'multilabel' | 'multiclass'.
+            classes: List of classes that contribute in loss computation. By default, all channels are included.
+        """
+        super().__init__(reduction=reduction, ignore_value=ignore_value, pos_weight=pos_weight)
+        assert mode in ["binary", "multi-binary", "multi-class"]
+        self.mode = mode
+        self.from_logits = from_logits
+        if classes is not None:
+            assert mode != "binary", "Masking num_classes is not supported with mode=binary"
+            classes = self.__to_tensor(classes, dtype=torch.long)
+        self.classes = classes
+
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None):
+        """
+        Forward pass for computing the custom loss.
+
+        Args:
+            y_pred (torch.Tensor): The predicted segmentation map, shape (N, C, D, H, W).
+            y_true (torch.Tensor): The ground truth segmentation map, shape (N, D, H, W) or (N, C, D, H, W).
+            filtration_mask (torch.Tensor, optional): A binary mask for filtering regions of interest, shape (N, 1, D, H, W).
+
+        Returns:
+            torch.Tensor: The computed Dice loss.
+
+        Note:
+            - If `from_logits` is True, sigmoid is applied to `y_pred`.
+            - The method handles binary, multi-binary, and multiclass segmentation.
+            - Uncertain annotations and regions outside the filtration mask are handled as per the base class methods.
+        """
+
+        assert y_true.size(0) == y_pred.size(0)
+
+        if self.from_logits:
+            y_pred = torch.sigmoid(y_pred)
+
+        batch_size = y_true.size(0)
+        num_classes = y_pred.size(1)
+        gt = y_true.clone()
+
+        dims = (0, 2) if self.bacthwise else 2
+
+        if self.mode == "binary":
+            y_true = y_true.view(batch_size, 1, -1)
+            y_pred = y_pred.view(batch_size, 1, -1)
+
+        if self.mode == "multi-binary":
+            y_true = y_true.view(batch_size, num_classes, -1)
+            y_pred = y_pred.view(batch_size, num_classes, -1)
+
+        if self.mode == "multiclass":
+            y_true = F.one_hot(y_true.long(), num_classes=num_classes).permute(0, 4, 1, 2, 3).float()
+            y_true = y_true.view(batch_size, num_classes, -1)
+            y_pred = y_pred.view(batch_size, num_classes, -1)
+
+        assert y_true.shape == y_pred.shape, \
+            f"Got differing shapes for y_true ({y_true.shape}) and y_pred ({y_pred.shape})"
+
+        y_true = self.filter_uncertain_annotation(data_tensor=y_true, gt_mask=y_true)
+        y_true = self.add_weights(loss=y_true, gt_mask=y_true)
+        y_true = self.roi_filtration(filtration_mask=filtration_mask, data_tensor=y_true)
+
+        y_pred = self.filter_uncertain_annotation(data_tensor=y_pred, gt_mask=y_true)
+        y_pred = self.add_weights(loss=y_pred, gt_mask=y_true)
+        y_pred = self.roi_filtration(filtration_mask=filtration_mask, data_tensor=y_pred)
+
+        loss = self.compute_loss(y_pred=y_pred, y_true=y_true.type_as(y_pred), dims=dims)
+
+        if self.ignore_mask:
+            mask = y_true.clip(min=0, max=1).sum(dims) > 0
+            loss *= mask.to(loss.dtype)
+
+        if self.classes is not None:
+            loss = loss[self.classes]
+
+        return self.aggregate_loss(loss=loss, y_true=gt)
+
+    @abstractmethod
+    def compute_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, dims: Tuple[int, ...]) -> torch.Tensor:
+        pass
+
+
 def to_tensor(x, dtype=None) -> torch.Tensor:
+    """
+    Converts input to PyTorch tensor.
+
+    This method converts various input types (torch.Tensor, numpy.ndarray, list, tuple)
+    to a PyTorch tensor. If a specific dtype is provided, the resulting tensor
+    will be cast to that dtype.
+
+    Args:
+        x: Input data to be converted to tensor. Can be a torch.Tensor,
+           numpy.ndarray, list, or tuple.
+        dtype: Optional. The desired data type of the output tensor.
+
+    Returns:
+        torch.Tensor: The input data converted to a PyTorch tensor.
+
+    Note:
+        If the input is already a torch.Tensor and no dtype is specified,
+        the input is returned unchanged.
+    """
     if isinstance(x, torch.Tensor):
         if dtype is not None:
             x = x.type(dtype)
@@ -276,6 +393,23 @@ def soft_jaccard_score(
     eps: float = 1e-7,
     dims=None,
 ) -> torch.Tensor:
+    """
+    Compute Soft Jaccard score between two tensors.
+
+    Args:
+        output (torch.Tensor): A tensor of shape [B, C, *] representing the predicted probabilities.
+        target (torch.Tensor): A tensor of shape [B, C, *] representing the ground truth.
+        smooth (float, optional): Smoothing factor to avoid division by zero. Default: 0.0.
+        eps (float, optional): Small constant to avoid numerical instability. Default: 1e-7.
+        dims (tuple, optional): Dimensions to reduce over. If None, reduces over all dimensions. Default: None.
+
+    Returns:
+        torch.Tensor: Soft Jaccard score.
+
+    Note:
+        The Soft Jaccard score (also known as Intersection over Union) is a measure of the overlap between
+        the prediction and the target. It ranges from 0 (no overlap) to 1 (perfect overlap).
+    """
     assert output.size() == target.size()
     if dims is not None:
         intersection = torch.sum(output * target, dim=dims)
@@ -296,6 +430,23 @@ def soft_dice_score(
     eps: float = 1e-7,
     dims=None,
 ) -> torch.Tensor:
+    """
+    Compute Soft Dice score between two tensors.
+
+    Args:
+        output (torch.Tensor): A tensor of shape [B, C, *] representing the predicted probabilities.
+        target (torch.Tensor): A tensor of shape [B, C, *] representing the ground truth.
+        smooth (float, optional): Smoothing factor to avoid division by zero. Default: 0.0.
+        eps (float, optional): Small constant to avoid numerical instability. Default: 1e-7.
+        dims (tuple, optional): Dimensions to reduce over. If None, reduces over all dimensions. Default: None.
+
+    Returns:
+        torch.Tensor: Soft Dice score.
+
+    Note:
+        The Soft Dice score is a measure of overlap between two samples. It ranges from 0 to 1,
+        where a Dice score of 1 denotes perfect and complete overlap.
+    """
     assert output.size() == target.size()
     if dims is not None:
         intersection = torch.sum(output * target, dim=dims)
@@ -316,6 +467,25 @@ def soft_tversky_score(
     eps: float = 1e-7,
     dims=None,
 ) -> torch.Tensor:
+    """
+    Compute Soft Tversky score between two tensors.
+
+    Args:
+        output (torch.Tensor): A tensor of shape [B, C, *] representing the predicted probabilities.
+        target (torch.Tensor): A tensor of shape [B, C, *] representing the ground truth.
+        alpha (float): Weight constant that penalize model for FPs (False Positives)
+        beta (float): Weight constant that penalize model for FNs (False Positives)
+        smooth (float, optional): Smoothing factor to avoid division by zero. Default: 0.0.
+        eps (float, optional): Small constant to avoid numerical instability. Default: 1e-7.
+        dims (tuple, optional): Dimensions to reduce over. If None, reduces over all dimensions. Default: None.
+
+    Returns:
+        torch.Tensor: Soft Tversky score.
+
+    Note:
+        The Soft Tversky score is a measure of overlap between two samples. It ranges from 0 to 1,
+        where a Tversky score of 1 denotes perfect and complete overlap.
+    """
     assert output.size() == target.size()
     if dims is not None:
         intersection = torch.sum(output * target, dim=dims)  # TP

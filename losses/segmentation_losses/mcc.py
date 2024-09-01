@@ -1,12 +1,21 @@
+from typing import List, Tuple
 import torch
 import torch.nn.functional as F
-from base_modules import SegmentationLoss
+from base_modules import CustomLoss
 
 
-
-
-class MCCLoss(SegmentationLoss):
-    def __init__(self, eps: float = 1e-5, ignore_value: float = -1):
+class MCCLoss(CustomLoss):
+    def __init__(
+            self,
+            eps: float = 1e-5,
+            ignore_value: float = -1,
+            pos_weight: torch.Tensor = None,
+            reduction: str = 'mean',
+            batchwise: bool = False,
+            from_logits: bool = True,
+            mode: str = 'binary',
+            classes: List[int] = None
+    ):
         """Compute Matthews Correlation Coefficient Loss for image segmentation task.
         It only supports binary mode.
 
@@ -16,42 +25,35 @@ class MCCLoss(SegmentationLoss):
         Reference:
             https://github.com/kakumarabhishek/MCC-Loss
         """
-        super().__init__(ignore_value=ignore_value)
+
+        super().__init__(
+            ignore_value=ignore_value,
+            pos_weight=pos_weight,
+            reduction=reduction,
+            from_logits=from_logits,
+            mode=mode,
+            classes=classes
+        )
         self.eps = eps
 
-    def forward(
-            self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None
-    ) -> torch.Tensor:
+    def compute_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, dims: Tuple[int, ...]) -> torch.Tensor:
         """
-        Compute the Matthews Correlation Coefficient (MCC) Loss for 3D data.
-
-        This method calculates the MCC loss for binary, multi-binary, and multiclass segmentation tasks
-        on 3D volumetric data. The MCC is a balanced measure which can be used even if the classes are 
-        of very different sizes.
+        Compute the Matthews Correlation Coefficient Loss between predicted and true segmentation masks.
 
         Args:
-            y_pred (torch.Tensor): The predicted segmentation volume, shape (N, C, D, H, W).
-            y_true (torch.Tensor): The ground truth segmentation volume, shape (N, D, H, W) or (N, C, D, H, W).
-            filtration_mask (torch.Tensor, optional): A binary mask for filtering regions of interest, shape (N, 1, D, H, W).
+            dims: (int or Tuple[int, int]): The dimensions along which to sum.
+            y_pred (torch.Tensor): Predicted segmentation mask.
+            y_true (torch.Tensor): Ground truth segmentation mask.
 
         Returns:
-            torch.Tensor: The computed MCC loss.
+            torch.Tensor: Computed Matthews Correlation Coefficient Loss.
 
         Note:
-            - For binary mode, y_true should be of shape (N, D, H, W) and y_pred of shape (N, 1, D, H, W).
-            - For multi-binary mode, both y_true and y_pred should be of shape (N, C, D, H, W).
-            - For multiclass mode, y_true should be of shape (N, D, H, W) and y_pred of shape (N, C, D, H, W).
-            - The loss is computed as 1 - MCC, so perfect predictions result in a loss of 0.
-            - A small epsilon is added to avoid division by zero.
-            - This implementation is adapted for 3D volumetric data, typically used in medical imaging tasks.
+            - The loss is computed as 1 - MCC
+            - The method handles smoothing to avoid division by zero.
+            - It can compute loss for binary, multiclass and multilabel cases.
         """
-
-        bs = y_true.shape[0]
-
         if self.mode == 'binary':
-            y_true = y_true.view(bs, 1, -1)
-            y_pred = y_pred.view(bs, 1, -1)
-            
             tp = torch.sum(torch.mul(y_pred, y_true)) + self.eps
             tn = torch.sum(torch.mul((1 - y_pred), (1 - y_true))) + self.eps
             fp = torch.sum(torch.mul(y_pred, (1 - y_true))) + self.eps
@@ -60,15 +62,15 @@ class MCCLoss(SegmentationLoss):
             numerator = torch.mul(tp, tn) - torch.mul(fp, fn)
             denominator = torch.sqrt(torch.add(tp, fp) * torch.add(tp, fn) * torch.add(tn, fp) * torch.add(tn, fn))
 
-            mcc = torch.div(numerator.sum(), denominator.sum())
+            mcc = torch.div(numerator.sum(dim=dims), denominator.sum(dim=dims))
             loss = 1.0 - mcc
-        
-        elif self.mode == "multi-binary":  # multi-binary mode
+
+        else:
             losses = list()
-            for i in range(y_pred.shape[1]):
-                y_pred_i = y_pred[:, i:i+1, ...]
-                y_true_i = y_true[:, i:i+1, ...]
-                
+            for i in range(y_pred.size(1)):
+                y_pred_i = y_pred[:, i:i + 1, ...]
+                y_true_i = y_true[:, i:i + 1, ...]
+
                 tp = torch.sum(torch.mul(y_pred_i, y_true_i)) + self.eps
                 tn = torch.sum(torch.mul((1 - y_pred_i), (1 - y_true_i))) + self.eps
                 fp = torch.sum(torch.mul(y_pred_i, (1 - y_true_i))) + self.eps
@@ -77,33 +79,9 @@ class MCCLoss(SegmentationLoss):
                 numerator = torch.mul(tp, tn) - torch.mul(fp, fn)
                 denominator = torch.sqrt(torch.add(tp, fp) * torch.add(tp, fn) * torch.add(tn, fp) * torch.add(tn, fn))
 
-                mcc = torch.div(numerator.sum(), denominator.sum())
+                mcc = torch.div(numerator.sum(dim=dims), denominator.sum(dim=dims))
                 losses.append(1.0 - mcc)
-            
-            loss = torch.mean(torch.stack(losses))
-            
-        elif self.mode == "multiclass":
-            num_classes = y_pred.shape[1]
-            y_true = F.one_hot(y_true.long(), num_classes=num_classes).permute(0, 3, 1, 2).float()
-            y_true = y_true.view(bs, num_classes, -1)
-            y_pred = y_pred.view(bs, num_classes, -1)
-            
-            losses = list()
-            for i in range(num_classes):
-                y_pred_i = y_pred[:, i:i+1, ...]
-                y_true_i = y_true[:, i:i+1, ...]
-                
-                tp = torch.sum(torch.mul(y_pred_i, y_true_i)) + self.eps
-                tn = torch.sum(torch.mul((1 - y_pred_i), (1 - y_true_i))) + self.eps
-                fp = torch.sum(torch.mul(y_pred_i, (1 - y_true_i))) + self.eps
-                fn = torch.sum(torch.mul((1 - y_pred_i), y_true_i)) + self.eps
 
-                numerator = torch.mul(tp, tn) - torch.mul(fp, fn)
-                denominator = torch.sqrt(torch.add(tp, fp) * torch.add(tp, fn) * torch.add(tn, fp) * torch.add(tn, fn))
-
-                mcc = torch.div(numerator.sum(), denominator.sum())
-                losses.append(1.0 - mcc)
-            
             loss = torch.mean(torch.stack(losses))
 
         return loss

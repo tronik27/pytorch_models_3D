@@ -19,7 +19,6 @@ class JaccardLoss(DiceLoss):
         smooth: float = 0.0,
         eps: float = 1e-7,
         ignore_value: float = -1,
-        ignore_mask: bool = False,
         batchwise: bool = False,
         pos_weight: Optional[torch.Tensor] = None,
     ):
@@ -35,7 +34,6 @@ class JaccardLoss(DiceLoss):
             eps: A small epsilon for numerical stability to avoid zero division error
                 (denominator will be always greater or equal to eps)
             ignore_value: Label that indicates ignored pixels (does not contribute to loss)
-            ignore_mask: If True, ignore certain regions in the mask
             batchwise: If True, compute loss batchwise
             pos_weight: Weights for positive examples
 
@@ -53,7 +51,6 @@ class JaccardLoss(DiceLoss):
             from_logits=from_logits,
             smooth=smooth,
             ignore_value=ignore_value,
-            ignore_mask=ignore_mask,
             eps=eps,
             batchwise=batchwise,
             pos_weight=pos_weight

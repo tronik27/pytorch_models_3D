@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import math
 
 import torch.nn as nn
@@ -67,18 +67,16 @@ class SegmentationLoss(torch.nn.Module, ABC):
         else:
             return loss
 
-    def aggregate_loss(self, loss: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+    def aggregate_loss(self, loss: torch.Tensor) -> torch.Tensor:
         """
         Method for loss value aggregation by loss tensor reduction.
 
         Args:
             loss (torch.Tensor): Loss value tensor.
-            y_true (torch.Tensor): Ground truth tensor.
 
         Returns:
             torch.Tensor: Reduced loss value tensor.
         """
-        loss = self.ignore(y_true=y_true, loss=loss)
         if self.reduction == 'mean':
             loss = torch.mean(loss)
         elif self.reduction == 'sum':
@@ -104,7 +102,13 @@ class SegmentationLoss(torch.nn.Module, ABC):
 
 class CrossEntropy(SegmentationLoss):
     def __init__(
-            self, pos_weight=None, reduction='mean', from_logits=True, mode: str = 'binary', ignore_value: float = -1
+            self,
+            pos_weight=None,
+            reduction='mean',
+            from_logits=True,
+            mode: str = 'binary',
+            classes: List[int] = None,
+            ignore_value: float = -1
     ) -> None:
         """
         Cross entropy segmentation loss class.
@@ -123,13 +127,22 @@ class CrossEntropy(SegmentationLoss):
         super().__init__(pos_weight=pos_weight, ignore_value=ignore_value, reduction=reduction)
         assert mode in ["binary", "multilabel", 'multiclass'], 'Incorrect task type!'
         self.mode = mode
-        if self.mode == 'multilabel':
-            self.ce = nn.CrossEntropyLoss(reduction='none')
+        if self.mode == 'multiclass':
+            if from_logits:
+                self.ce = nn.CrossEntropyLoss(weight=self.pos_weight, reduction='none')
+            else:
+                raise NotImplementedError(
+                    'CrossEntropy with from_logits=False is not implemented for multiclass mode!'
+                )
         else:
             if from_logits:
                 self.ce = nn.BCEWithLogitsLoss(reduction='none')
             else:
                 self.ce = nn.BCELoss(reduction='none')
+        if classes is not None:
+            assert mode != "binary", "Masking num_classes is not supported with mode=binary"
+            classes = self.__to_tensor(classes, dtype=torch.long)
+        self.classes = classes
 
     @abstractmethod
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None):
@@ -143,7 +156,7 @@ class CustomLoss(SegmentationLoss, ABC, _Loss):
             from_logits: bool,
             ignore_value: float,
             mode: str,
-            classes: list,
+            classes: List[int],
             pos_weight: torch.Tensor,
             batchwise: bool = False
     ) -> None:
@@ -221,10 +234,6 @@ class CustomLoss(SegmentationLoss, ABC, _Loss):
         y_pred = self.roi_filtration(filtration_mask=filtration_mask, data_tensor=y_pred)
 
         loss = self.compute_loss(y_pred=y_pred, y_true=y_true.type_as(y_pred), dims=dims)
-
-        if self.ignore_mask:
-            mask = y_true.clip(min=0, max=1).sum(dims) > 0
-            loss *= mask.to(loss.dtype)
 
         if self.classes is not None:
             loss = loss[self.classes]
@@ -535,29 +544,33 @@ def label_smoothed_nll_loss(
     target: torch.Tensor,
     epsilon: float,
     ignore_index=None,
-    reduction="mean",
     dim=-1,
 ) -> torch.Tensor:
-    """NLL loss with label smoothing
+    """
+    NLL loss with label smoothing
 
     References:
         https://github.com/pytorch/fairseq/blob/master/fairseq/criterions/label_smoothed_cross_entropy.py
 
     Args:
         lprobs (torch.Tensor): Log-probabilities of predictions (e.g after log_softmax)
+        target (torch.Tensor): Target tensor
+        epsilon (float): Smoothing parameter, default 0.1
+        ignore_index (int, optional): Pad token, default None
+        dim (int, optional): Dimension to reduce, default -1
 
+    Returns:
+        torch.Tensor: loss, scalar by default
     """
+
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(dim)
 
     if ignore_index is not None:
         pad_mask = target.eq(ignore_index)
-        target = target.masked_fill(pad_mask, 0)
+        target = target.masked_fill(pad_mask, value=0)
         nll_loss = -lprobs.gather(dim=dim, index=target)
         smooth_loss = -lprobs.sum(dim=dim, keepdim=True)
-
-        # nll_loss.masked_fill_(pad_mask, 0.0)
-        # smooth_loss.masked_fill_(pad_mask, 0.0)
         nll_loss = nll_loss.masked_fill(pad_mask, 0.0)
         smooth_loss = smooth_loss.masked_fill(pad_mask, 0.0)
     else:
@@ -566,13 +579,6 @@ def label_smoothed_nll_loss(
 
         nll_loss = nll_loss.squeeze(dim)
         smooth_loss = smooth_loss.squeeze(dim)
-
-    if reduction == "sum":
-        nll_loss = nll_loss.sum()
-        smooth_loss = smooth_loss.sum()
-    if reduction == "mean":
-        nll_loss = nll_loss.mean()
-        smooth_loss = smooth_loss.mean()
 
     eps_i = epsilon / lprobs.size(dim)
     loss = (1.0 - epsilon) * nll_loss + eps_i * smooth_loss

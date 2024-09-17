@@ -1,0 +1,27 @@
+Metadata-Version: 2.1
+Name: pytorch-models-3D
+Version: 0.1.0
+Summary: Deep learning library for 3D data
+Home-page: https://github.com/tronik27/pytorch_models_3D
+Author: Nikita Trotsenko
+Author-email: tronik27@gmail.com
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Topic :: Scientific/Engineering :: deep learning 3D data
+Classifier: Topic :: Science Apps.
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+
+# Pytorch models 3D
+
+
+Python library with 3D Neural Networks based on PyTorch.
+
+

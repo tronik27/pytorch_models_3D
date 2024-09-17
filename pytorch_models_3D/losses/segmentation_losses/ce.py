@@ -25,7 +25,9 @@ class SegmentationCE(CrossEntropy):
         loss = self.filter_uncertain_annotation(data_tensor=loss, gt_mask=y_true)
         loss = self.add_weights(loss=loss, gt_mask=y_true)
         loss = self.roi_filtration(data_tensor=loss, filtration_mask=filtration_mask)
-        return self.aggregate_loss(loss=loss, y_true=y_true)
+        if self.classes is not None:
+            loss = loss[self.classes]
+        return self.aggregate_loss(loss=loss)
 
 
 class Focal(CrossEntropy):
@@ -38,6 +40,7 @@ class Focal(CrossEntropy):
             mode: str = 'binary',
             ignore_value=-1,
             gamma=2,
+            classes: List[int] = None
     ) -> None:
         """
         Focal cross entropy segmentation loss class.
@@ -64,7 +67,12 @@ class Focal(CrossEntropy):
             where pt is the model's estimated probability for the target class.
         """
         super().__init__(
-            reduction=reduction, pos_weight=pos_weight, mode=mode, ignore_value=ignore_value, from_logits=from_logits
+            reduction=reduction,
+            pos_weight=pos_weight,
+            mode=mode,
+            ignore_value=ignore_value,
+            from_logits=from_logits,
+            classes=classes
         )
         self.gamma = gamma
 
@@ -98,12 +106,14 @@ class Focal(CrossEntropy):
         loss = self.filter_uncertain_annotation(data_tensor=loss, gt_mask=y_true)
         loss = self.add_weights(loss=loss, gt_mask=y_true)
         loss = self.roi_filtration(data_tensor=loss, filtration_mask=filtration_mask)
-        return self.aggregate_loss(loss=loss, y_true=y_true)
+        if self.classes is not None:
+            loss = loss[self.classes]
+        return self.aggregate_loss(loss=loss)
 
 
-class WeightedCE(CustomLoss):
+class WeightedCE(CustomLoss, CrossEntropy):
 
-    def calculate_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, dims: int or Tuple[int, int]) -> torch.Tensor:
+    def compute_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, dims: int or Tuple[int, int]) -> torch.Tensor:
         """
         Compute the weighted Cross-Entropy and IoU losses.
 
@@ -181,14 +191,6 @@ class WeightedCE(CustomLoss):
 
 class SoftBCEWithLogitsLoss(nn.Module):
 
-    __constants__ = [
-        "weight",
-        "pos_weight",
-        "reduction",
-        "ignore_index",
-        "smooth_factor",
-    ]
-
     def __init__(
         self,
         weight: Optional[torch.Tensor] = None,
@@ -254,42 +256,81 @@ class SoftBCEWithLogitsLoss(nn.Module):
         return loss
 
 
-class SoftCrossEntropyLoss(nn.Module):
-
-    __constants__ = ["reduction", "ignore_index", "smooth_factor"]
+class SoftCrossEntropyLoss(CrossEntropy):
 
     def __init__(
         self,
         reduction: str = "mean",
         smooth_factor: Optional[float] = None,
-        ignore_index: Optional[int] = -100,
         dim: int = 1,
+        pos_weight: Optional[torch.Tensor] = None,
+        from_logits: bool = True,
+        mode: str = 'binary',
+        ignore_value: float = -1,
+        classes: List[int] = None
     ):
-        """Drop-in replacement for torch.nn.CrossEntropyLoss with label_smoothing
+        """
+        SoftCrossEntropyLoss
 
         Args:
-            smooth_factor: Factor to smooth target (e.g. if smooth_factor=0.1 then [1, 0, 0] -> [0.9, 0.05, 0.05])
-
-        Shape
-             - **y_pred** - torch.Tensor of shape (N, C, H, W)
-             - **y_true** - torch.Tensor of shape (N, H, W)
-
-        Reference
-            https://github.com/BloodAxe/pytorch-toolbelt
+            reduction (str): Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+                'none': no reduction will be applied, 'mean': the sum of the output will be divided by the number of
+                elements in the output, 'sum': the output will be summed. Default: 'mean'
+            smooth_factor (float): Factor to smooth target (e.g. if smooth_factor=0.1 then [1, 0, 1] -> [0.9, 0.1, 0.9])
+            dim (int): Dimension to apply the loss to. Default: 1
+            pos_weight (torch.Tensor): A weight of positive examples. Must be a vector with length equal to the
+                number of classes. Default: None
+            from_logits (bool): If True, assumes input is raw logits. If False, assumes input is probabilities.
+                Default: True
+            mode (str): Specifies the task type: 'binary' | 'multilabel' | 'multiclass'. Default: 'binary'
+            ignore_value (float): Specifies a target value that is ignored and does not contribute to the input
+                gradient.
+                Default: -1
+            classes (List[int]): List of classes that contribute in loss computation. By default, all channels are
+                included. Default: None
         """
         super().__init__()
         self.smooth_factor = smooth_factor
-        self.ignore_index = ignore_index
-        self.reduction = reduction
         self.dim = dim
+        super().__init__(
+            reduction=reduction,
+            pos_weight=pos_weight,
+            mode=mode,
+            ignore_value=ignore_value,
+            from_logits=from_logits,
+            classes=classes
+        )
 
-    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, filtration_mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Calculate the soft cross entropy loss value.
+
+        Args:
+            y_pred (torch.Tensor): The model's predicted output. Shape should be (N, C, ...) where N is
+                the batch size and C is the number of classes.
+            y_true (torch.Tensor): The ground truth labels. Shape should match y_pred or be (N, ...) for
+                class indices.
+            filtration_mask (torch.Tensor, optional): Mask for filtering regions of interest. Should have
+                the same spatial dimensions as y_pred and y_true.
+
+        Returns:
+            torch.Tensor: The computed soft cross entropy loss.
+
+        Note:
+            - The method handles binary, multi-binary, and multiclass segmentation.
+            - Uncertain annotations and regions outside the filtration mask are handled as per the base class methods.
+        """
         log_prob = F.log_softmax(y_pred, dim=self.dim)
-        return label_smoothed_nll_loss(
+        loss = label_smoothed_nll_loss(
             log_prob,
             y_true,
             epsilon=self.smooth_factor,
             ignore_index=self.ignore_index,
-            reduction=self.reduction,
             dim=self.dim,
         )
+        loss = self.filter_uncertain_annotation(data_tensor=loss, gt_mask=y_true)
+        loss = self.add_weights(loss=loss, gt_mask=y_true)
+        loss = self.roi_filtration(data_tensor=loss, filtration_mask=filtration_mask)
+        if self.classes is not None:
+            loss = loss[self.classes]
+        return self.aggregate_loss(loss=loss)

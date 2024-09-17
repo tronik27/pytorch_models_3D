@@ -1,0 +1,6 @@
+torch
+torchmetrics
+torchsummary
+torchvision
+matplotlib
+more_itertools
